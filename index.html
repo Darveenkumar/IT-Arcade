@@ -160,6 +160,22 @@
   @keyframes stmid{0%{transform:translateY(-64px);opacity:0}18%{opacity:1}30%{transform:translateY(0)}100%{transform:translateY(0);opacity:1}}
   @keyframes sttop{0%,34%{transform:translateY(-64px);opacity:0}42%{opacity:1}56%{transform:translateY(0)}62%{transform:translateY(-4px)}70%{transform:translateY(0)}100%{transform:translateY(0);opacity:1}}
 
+  /* ===== offline runner ===== */
+  .runner-wrap{
+    margin-top:26px;position:relative;overflow:hidden;
+    background:linear-gradient(180deg,#FAF7FF,#FFFFFF);
+    border:1px solid var(--line);border-radius:18px;
+    padding:16px 18px 14px;
+    animation:cardin .5s cubic-bezier(.2,.7,.2,1) .3s both;
+  }
+  .runner-head{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:10px;flex-wrap:wrap}
+  .runner-hi{font-family:var(--display);font-size:12px;letter-spacing:.14em;color:var(--ink-faint);font-weight:600;white-space:nowrap}
+  .runner-hi b{color:#8B5CF6}
+  #runner{display:block;width:100%;height:200px;border-radius:12px;cursor:pointer;
+    background:linear-gradient(180deg,#FFFFFF,#FBFAFF);outline:none}
+  #runner:focus-visible{box-shadow:0 0 0 2px #8B5CF6}
+  .runner-hint{margin-top:9px;font-size:11.5px;color:var(--ink-faint);text-align:center;letter-spacing:.02em}
+
   /* ===== player ===== */
   #player{position:fixed;inset:0;z-index:60;display:none;flex-direction:column;background:#fff}
   #player.open{display:flex;animation:cardin .28s ease}
@@ -201,10 +217,19 @@
       </div>
       <div class="chill">
         <span class="pill"><span class="ic">💊</span>Breakout&nbsp;Zone</span>
-        <span class="chilltext">Take a chill pill&nbsp;— then resume work.</span>
+        <span class="chilltext">Take a chill pill&nbsp; then get back to keeping things running.</span>
       </div>
     </header>
     <div class="grid" id="grid"></div>
+
+    <section class="runner-wrap" aria-label="Offline runner game">
+      <div class="runner-head">
+        <div class="kicker"><span class="dot" style="background:#8B5CF6"></span><span>Offline Runner &nbsp;·&nbsp; Jump the bugs, duck the spam</span></div>
+        <div class="runner-hi">HI <b id="runHi">00000</b> &nbsp;&nbsp; <span id="runScore">00000</span></div>
+      </div>
+      <canvas id="runner" tabindex="0"></canvas>
+      <div class="runner-hint" id="runHint">Click / tap to start &nbsp;·&nbsp; Space or ↑ to jump &nbsp;·&nbsp; ↓ to duck</div>
+    </section>
   </main>
 
   <section id="player" aria-hidden="true">
@@ -276,6 +301,225 @@ function closeGame(){
 }
 document.getElementById("backBtn").addEventListener("click",closeGame);
 window.addEventListener("keydown",function(e){ if(e.key==="Escape"&&player.classList.contains("open")) closeGame(); });
+</script>
+
+<script>
+/* ============ OFFLINE RUNNER — cute IT robot, zero network calls ============ */
+(function(){
+  var cv=document.getElementById("runner"); if(!cv) return;
+  var ctx=cv.getContext("2d");
+  var DPR=Math.min(2,window.devicePixelRatio||1);
+  var CSSH=200, cssW=300, groundY=CSSH-30;
+  function resize(){
+    cssW=cv.clientWidth||cv.parentElement.clientWidth||300;
+    cv.width=Math.round(cssW*DPR); cv.height=Math.round(CSSH*DPR);
+    ctx.setTransform(DPR,0,0,DPR,0,0);
+  }
+  window.addEventListener("resize",resize);
+
+  var ACC="#8B5CF6", ACC2="#B79BFF", BUG="#EF4444", INK="#14151A", FAINT="#B9BDC9";
+  var HIKEY="itArcadeRunnerHI", hi=0;
+  try{ hi=parseInt(localStorage.getItem(HIKEY)||"0",10)||0; }catch(e){}
+
+  var runHi=document.getElementById("runHi");
+  var runScore=document.getElementById("runScore");
+  var runHint=document.getElementById("runHint");
+  function pad(n){ return ("00000"+Math.floor(n)).slice(-5); }
+  runHi.textContent=pad(hi);
+
+  var JUMP=-10.6, GRAV=0.58, STAND=34, DUCK=20, HW=30;
+  var hero, obs, speed, score, state, frame, distSpawn, spawnGap, hover=false, flashT=0, flashMsg="";
+
+  function reset(){
+    hero={x:48, y:groundY-STAND, vy:0, onGround:true, duck:false};
+    obs=[]; speed=5.0; score=0; frame=0; distSpawn=0; spawnGap=280; flashT=0;
+  }
+  reset(); state="idle";
+
+  function startRun(){ if(state==="idle"||state==="over"){ reset(); state="run"; runHint.style.opacity="0"; } }
+  function flap(){
+    if(state==="idle"){ startRun(); return; }
+    if(state==="over"){ startRun(); return; }
+    if(hero.onGround){ hero.vy=JUMP; hero.onGround=false; }
+  }
+  function gameOver(){
+    state="over";
+    if(score>hi){ hi=Math.floor(score); try{localStorage.setItem(HIKEY,String(hi));}catch(e){} runHi.textContent=pad(hi); flashMsg="NEW HIGH SCORE!"; }
+    else flashMsg="GAME OVER";
+    flashT=1;
+    runHint.style.opacity="1";
+    runHint.textContent="Space / tap to retry";
+  }
+
+  // input — only capture keyboard when focused or hovered (never hijack the page)
+  cv.addEventListener("pointerdown",function(){ cv.focus(); if(state==="run"){flap();} else {startRun();} });
+  cv.addEventListener("mouseenter",function(){ hover=true; });
+  cv.addEventListener("mouseleave",function(){ hover=false; hero.duck=false; });
+  window.addEventListener("keydown",function(e){
+    var active = (document.activeElement===cv) || hover;
+    if(!active) return;
+    if(e.key===" "||e.key==="ArrowUp"||e.key==="w"||e.key==="W"){ e.preventDefault(); flap(); }
+    else if(e.key==="ArrowDown"||e.key==="s"||e.key==="S"){ e.preventDefault(); if(state==="run") hero.duck=true; }
+  });
+  window.addEventListener("keyup",function(e){
+    if(e.key==="ArrowDown"||e.key==="s"||e.key==="S") hero.duck=false;
+  });
+
+  function spawn(){
+    var air = score>160 && Math.random()<0.34;
+    if(air){ obs.push({type:"air", x:cssW+20, w:34, h:26, y:groundY-56}); }
+    else { var w=18+Math.random()*14; obs.push({type:"bug", x:cssW+20, w:w, h:24, y:groundY-24}); }
+  }
+
+  function update(){
+    frame++;
+    if(state==="run"){
+      speed+=0.0016;
+      score+=speed*0.03;
+      // hero physics
+      var curH = (hero.duck && hero.onGround) ? DUCK : STAND;
+      hero.vy+=GRAV; hero.y+=hero.vy;
+      var floor=groundY-curH;
+      if(hero.y>=floor){ hero.y=floor; hero.vy=0; hero.onGround=true; } else hero.onGround=false;
+      // spawn
+      distSpawn+=speed;
+      if(distSpawn>=spawnGap){ spawn(); distSpawn=0; spawnGap=Math.max(150, 240+Math.random()*150 - speed*6); }
+      // move + collide
+      var hb={x:hero.x+3, y:hero.y+2, w:HW-6, h:curH-4};
+      for(var i=obs.length-1;i>=0;i--){
+        var o=obs[i]; o.x-=speed;
+        if(o.x+o.w<-10){ obs.splice(i,1); continue; }
+        if(hb.x<o.x+o.w && hb.x+hb.w>o.x && hb.y<o.y+o.h && hb.y+hb.h>o.y){ gameOver(); }
+      }
+      runScore.textContent=pad(score);
+    } else if(state==="idle"){
+      // gentle idle bob
+      hero.y=groundY-STAND + Math.sin(frame*0.08)*2;
+    }
+    if(flashT>0) flashT-=0.02;
+  }
+
+  // ---- drawing ----
+  function drawGround(){
+    ctx.strokeStyle="#E4E1EC"; ctx.lineWidth=2;
+    ctx.beginPath(); ctx.moveTo(0,groundY+0.5); ctx.lineTo(cssW,groundY+0.5); ctx.stroke();
+    // moving dashes to convey speed
+    ctx.strokeStyle="#EBE7F4"; ctx.lineWidth=2;
+    var off=(frame*speed)% 34;
+    for(var x=-off;x<cssW;x+=34){ ctx.beginPath(); ctx.moveTo(x,groundY+8); ctx.lineTo(x+14,groundY+8); ctx.stroke(); }
+  }
+  function drawHero(){
+    var curH=(hero.duck && hero.onGround)?DUCK:STAND;
+    var x=hero.x, y=hero.y, w=HW, h=curH;
+    ctx.save();
+    // legs (run animation)
+    ctx.fillStyle=ACC;
+    if(state==="run" && hero.onGround){
+      var step=Math.floor(frame/5)%2;
+      ctx.fillRect(x+6, y+h, 6, 6*(step?1:0.4));
+      ctx.fillRect(x+w-12, y+h, 6, 6*(step?0.4:1));
+    } else {
+      ctx.fillRect(x+6, y+h, 6, 4); ctx.fillRect(x+w-12, y+h, 6, 4);
+    }
+    // body (rounded) with gradient
+    var g=ctx.createLinearGradient(x,y,x,y+h);
+    g.addColorStop(0,ACC2); g.addColorStop(1,ACC);
+    ctx.fillStyle=g;
+    rr(x,y,w,h,8); ctx.fill();
+    // face panel
+    ctx.fillStyle="#0E0B1A";
+    rr(x+5, y+ (hero.duck?4:7), w-10, (hero.duck?9:12), 4); ctx.fill();
+    // eyes
+    var blink = (frame%150)<6;
+    ctx.fillStyle="#fff";
+    var ey=y+(hero.duck?8:12);
+    if(!blink){
+      ctx.beginPath(); ctx.arc(x+11,ey,2.6,0,6.283); ctx.fill();
+      ctx.beginPath(); ctx.arc(x+w-11,ey,2.6,0,6.283); ctx.fill();
+      ctx.fillStyle=ACC;
+      ctx.beginPath(); ctx.arc(x+12,ey,1.1,0,6.283); ctx.fill();
+      ctx.beginPath(); ctx.arc(x+w-10,ey,1.1,0,6.283); ctx.fill();
+    } else {
+      ctx.fillRect(x+8,ey,6,1.6); ctx.fillRect(x+w-14,ey,6,1.6);
+    }
+    // antenna
+    if(!hero.duck){
+      ctx.strokeStyle=ACC; ctx.lineWidth=2;
+      ctx.beginPath(); ctx.moveTo(x+w/2, y); ctx.lineTo(x+w/2, y-8); ctx.stroke();
+      ctx.fillStyle=BUG; ctx.beginPath(); ctx.arc(x+w/2, y-10, 3, 0, 6.283); ctx.fill();
+    }
+    ctx.restore();
+  }
+  function drawBug(o){
+    var cx=o.x+o.w/2, cy=o.y+o.h/2;
+    ctx.save();
+    // legs
+    ctx.strokeStyle="#B91C1C"; ctx.lineWidth=1.8;
+    for(var s=-1;s<=1;s++){
+      ctx.beginPath(); ctx.moveTo(cx-o.w*0.32, cy+s*4); ctx.lineTo(cx-o.w*0.5, cy+s*6+2); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(cx+o.w*0.32, cy+s*4); ctx.lineTo(cx+o.w*0.5, cy+s*6+2); ctx.stroke();
+    }
+    // body
+    var g=ctx.createLinearGradient(cx,o.y,cx,o.y+o.h);
+    g.addColorStop(0,"#F87171"); g.addColorStop(1,BUG);
+    ctx.fillStyle=g;
+    ctx.beginPath(); ctx.ellipse(cx,cy,o.w*0.5,o.h*0.5,0,0,6.283); ctx.fill();
+    // shell line
+    ctx.strokeStyle="#B91C1C"; ctx.lineWidth=1.4;
+    ctx.beginPath(); ctx.moveTo(cx,o.y+2); ctx.lineTo(cx,o.y+o.h-2); ctx.stroke();
+    // antennae
+    ctx.beginPath(); ctx.moveTo(cx-4,o.y+2); ctx.lineTo(cx-8,o.y-4); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(cx+4,o.y+2); ctx.lineTo(cx+8,o.y-4); ctx.stroke();
+    // eyes
+    ctx.fillStyle="#fff";
+    ctx.beginPath(); ctx.arc(cx-3,cy-1,1.6,0,6.283); ctx.fill();
+    ctx.beginPath(); ctx.arc(cx+3,cy-1,1.6,0,6.283); ctx.fill();
+    ctx.restore();
+  }
+  function drawEnvelope(o){
+    ctx.save();
+    var g=ctx.createLinearGradient(o.x,o.y,o.x,o.y+o.h);
+    g.addColorStop(0,"#fff"); g.addColorStop(1,"#F1ECFF");
+    ctx.fillStyle=g; ctx.strokeStyle=ACC; ctx.lineWidth=2;
+    rr(o.x,o.y,o.w,o.h,4); ctx.fill(); ctx.stroke();
+    // flap
+    ctx.beginPath(); ctx.moveTo(o.x,o.y+2); ctx.lineTo(o.x+o.w/2,o.y+o.h*0.6); ctx.lineTo(o.x+o.w,o.y+2); ctx.stroke();
+    // spam @
+    ctx.fillStyle=BUG; ctx.font="bold 11px "+"ui-monospace,monospace"; ctx.textAlign="center"; ctx.textBaseline="middle";
+    ctx.fillText("@", o.x+o.w/2, o.y+o.h*0.75);
+    ctx.restore();
+  }
+  function rr(x,y,w,h,r){ ctx.beginPath(); ctx.moveTo(x+r,y);
+    ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r);
+    ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r); ctx.closePath(); }
+
+  function draw(){
+    ctx.clearRect(0,0,cssW,CSSH);
+    drawGround();
+    for(var i=0;i<obs.length;i++){ obs[i].type==="bug"?drawBug(obs[i]):drawEnvelope(obs[i]); }
+    drawHero();
+    // idle / over text
+    ctx.textAlign="center"; ctx.textBaseline="middle";
+    if(state==="idle"){
+      ctx.fillStyle=FAINT; ctx.font="600 13px ui-sans-serif,system-ui,sans-serif";
+      ctx.fillText("Press Space or tap to run", cssW/2, 34);
+    } else if(state==="over"){
+      ctx.fillStyle= flashMsg.indexOf("HIGH")>=0 ? ACC : INK;
+      ctx.font="700 16px ui-sans-serif,system-ui,sans-serif";
+      var s = flashT>0 ? (0.7+0.3*Math.sin(frame*0.3)) : 1;
+      ctx.globalAlpha=s;
+      ctx.fillText(flashMsg, cssW/2, 30);
+      ctx.globalAlpha=1;
+    }
+  }
+
+  function loop(){
+    update(); draw();
+    requestAnimationFrame(loop);
+  }
+  resize();
+  requestAnimationFrame(loop);
+})();
 </script>
 </body>
 </html>
